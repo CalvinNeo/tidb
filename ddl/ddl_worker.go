@@ -71,11 +71,21 @@ const (
 	generalWorker workerType = 0
 	// addIdxWorker is the worker who handles the operation of adding indexes.
 	addIdxWorker workerType = 1
+	// pollTiflashWoker is the worker who handles the replica status poll.
+	pollTiflashWorker workerType = 2
 	// waitDependencyJobInterval is the interval when the dependency job doesn't be done.
 	waitDependencyJobInterval = 200 * time.Millisecond
 	// noneDependencyJob means a job has no dependency-job.
 	noneDependencyJob = 0
 )
+
+type Worker interface {
+	start(d *ddlCtx)
+	close()
+	Tp() workerType
+	wgAdd(delta int)
+	String() string
+}
 
 // worker is used for handling DDL jobs.
 // Now we have two kinds of workers.
@@ -93,6 +103,69 @@ type worker struct {
 	logCtx          context.Context
 
 	ddlJobCache
+}
+
+type pollWorker struct {
+	ddl             *ddl
+	id              int32
+	tp              workerType
+	sessPool        *sessionPool
+	wg              sync.WaitGroup
+	ctx             context.Context
+}
+
+func newPollWorker (ddl *ddl, ctx context.Context, tp workerType, sessPool *sessionPool) *pollWorker {
+	pw := &pollWorker{
+		ddl:                ddl,
+		ctx:                ctx,
+		id:                 atomic.AddInt32(&ddlWorkerID, 1),
+		tp:                 tp,
+		sessPool:           sessPool,
+	}
+	return pw
+}
+
+func (pw *pollWorker) start(d *ddlCtx){
+	defer pw.wg.Done()
+	fmt.Println("poll worker start")
+	// do something
+	// when get the right time
+	sctx, err := pw.sessPool.get()
+	if err != nil {
+		panic(err)
+	}
+	defer pw.sessPool.put(sctx)
+	fmt.Println(sctx)
+	for {
+		// poll status
+		// ...
+
+
+		//if err := pw.ddl.CreateSchema(sctx, model.NewCIStr("testschema"), nil, nil, nil); err!= nil {
+		//	fmt.Println("internal create table fail")
+		//	panic(err)
+		//}
+		// just test success
+		fmt.Println("internal create table success")
+		break
+	}
+}
+
+func (pw *pollWorker) close(){
+	fmt.Println("poll worker close")
+	pw.wg.Wait()
+}
+
+func (pw *pollWorker) wgAdd(delta int){
+	pw.wg.Add(delta)
+}
+
+func (pw *pollWorker) String() string {
+	return fmt.Sprintf("worker %d, tp %s", pw.id, "tiflash-poll")
+}
+
+func (pw *pollWorker) Tp() workerType {
+	return pw.tp
 }
 
 // ddlJobCache is a cache for each DDL job.
@@ -124,6 +197,18 @@ func newWorker(ctx context.Context, tp workerType, sessPool *sessionPool, delRan
 	worker.addingDDLJobKey = addingDDLJobPrefix + worker.typeStr()
 	worker.logCtx = logutil.WithKeyValue(context.Background(), "worker", worker.String())
 	return worker
+}
+
+func (w *worker) wgAdd(delta int){
+	w.wg.Add(delta)
+}
+
+func (w *worker) GetDDLJobChan() chan struct{} {
+	return w.ddlJobCh
+}
+
+func (w *worker) Tp() workerType {
+	return w.tp
 }
 
 func (w *worker) typeStr() string {
@@ -611,9 +696,6 @@ func skipWriteBinlog(job *model.Job) bool {
 	// it's used to update table's TiFlash replica available status.
 	case model.ActionUpdateTiFlashReplicaStatus:
 		return true
-	// It is done without modifying table info, bin log is not needed
-	case model.ActionAlterTableAlterPartition:
-		return true
 	}
 
 	return false
@@ -818,8 +900,6 @@ func (w *worker) runDDLJob(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, 
 		ver, err = onCreateSequence(d, t, job)
 	case model.ActionAlterIndexVisibility:
 		ver, err = onAlterIndexVisibility(t, job)
-	case model.ActionAlterTableAlterPartition:
-		ver, err = onAlterTableAlterPartition(t, job)
 	case model.ActionAlterSequence:
 		ver, err = onAlterSequence(t, job)
 	case model.ActionRenameTables:
@@ -835,7 +915,11 @@ func (w *worker) runDDLJob(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, 
 	case model.ActionAlterPlacementPolicy:
 		ver, err = onAlterPlacementPolicy(d, t, job)
 	case model.ActionAlterTablePartitionPolicy:
-		ver, err = onAlterTablePartitionOptions(t, job)
+		ver, err = onAlterTablePartitionOptions(d, t, job)
+	case model.ActionAlterTablePlacement:
+		ver, err = onAlterTablePlacement(d, t, job)
+	case model.ActionAlterCacheTable:
+		ver, err = onAlterCacheTable(t, job)
 	default:
 		// Invalid job, cancel it.
 		job.State = model.JobStateCancelled
@@ -1054,15 +1138,6 @@ func updateSchemaVersion(t *meta.Meta, job *model.Job) (int64, error) {
 		if len(job.CtxVars) > 0 {
 			if oldIDs, ok := job.CtxVars[0].([]int64); ok {
 				diff.AffectedOpts = buildPlacementAffects(oldIDs, oldIDs)
-			}
-		}
-	case model.ActionAlterTableAlterPartition:
-		diff.TableID = job.TableID
-		if len(job.CtxVars) > 0 {
-			diff.AffectedOpts = []*model.AffectedOption{
-				{
-					TableID: job.CtxVars[0].(int64),
-				},
 			}
 		}
 	default:
