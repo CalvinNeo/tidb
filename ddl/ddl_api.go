@@ -24,7 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/coreos/etcd/store"
+	"github.com/pingcap/tidb/ddl/placement"
 	ddlutil "github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/store/helper"
 	"github.com/pingcap/tidb/tablecodec"
@@ -4765,7 +4765,7 @@ func (d *ddl) PollTiFlashReplicaStatus(ctx sessionctx.Context) error {
 
 	curTso := time.Now().Unix()
 
-	if ddlGlobalSchemaVersion != lastHandledSchemaVersion || int64(lastHandledSchemaTso+300) <= curTso {
+	if true || ddlGlobalSchemaVersion != lastHandledSchemaVersion || int64(lastHandledSchemaTso+300) <= curTso {
 		// Need to update table
 		allUpdate, err := d.TiFlashReplicaTableUpdate(ctx)
 		if err != nil {
@@ -4776,13 +4776,13 @@ func (d *ddl) PollTiFlashReplicaStatus(ctx sessionctx.Context) error {
 			v := fmt.Sprintf("%v_tso_%v", ddlGlobalSchemaVersion, curTso)
 			d.etcdCli.Put(d.ctx, "/tiflash/cluster/last_handled_schema_version", v)
 		}
+
 	}
 	return nil
 }
 
 // Compare supposed rule, and we actually get from TableInfo
 func isRuleMatch(rule placement.Rule, tb PollTiFlashReplicaStatusContext) (bool, *placement.Rule) {
-
 	// Compute startKey
 	startKey := tablecodec.GenTableRecordPrefix(tb.ID)
 	endKey := tablecodec.EncodeTablePrefix(tb.ID + 1)
@@ -4826,13 +4826,25 @@ func isRuleMatch(rule placement.Rule, tb PollTiFlashReplicaStatusContext) (bool,
 	if isMatch {
 		return true, nil
 	} else {
-		ruleNew := MakeBaseRule()
-		ruleNew.StartKeyHex = startKey.String()
-		ruleNew.EndKeyHex = endKey.String()
-		ruleNew.Count = int(tb.TableInfo.TiFlashReplica.Count)
-		ruleNew.LocationLabels = tb.TableInfo.TiFlashReplica.LocationLabels
-		return false, nil
+		return false, MakeNewRule(tb)
 	}
+}
+
+func MakeNewRule(tb PollTiFlashReplicaStatusContext) *placement.Rule {
+	ruleId := fmt.Sprintf("table-%v-r", tb.ID)
+	startKey := tablecodec.GenTableRecordPrefix(tb.ID)
+	endKey := tablecodec.EncodeTablePrefix(tb.ID + 1)
+	startKey = codec.EncodeBytes([]byte{}, startKey)
+	endKey = codec.EncodeBytes([]byte{}, endKey)
+
+	ruleNew := MakeBaseRule()
+	ruleNew.ID = ruleId
+	ruleNew.StartKeyHex = startKey.String()
+	ruleNew.EndKeyHex = endKey.String()
+	ruleNew.Count = int(tb.TableInfo.TiFlashReplica.Count)
+	ruleNew.LocationLabels = tb.TableInfo.TiFlashReplica.LocationLabels
+
+	return &ruleNew
 }
 
 func GetTiflashHttpAddr(host string, statusAddr string) (string, error) {
@@ -4865,13 +4877,14 @@ func GetTiflashHttpAddr(host string, statusAddr string) (string, error) {
 	if !ok {
 		return "", errors.New("Error json")
 	}
-	port, ok := engineStore["http_port"].(int)
+	port64, ok := engineStore["http_port"].(float64)
 	if !ok {
 		return "", errors.New("Error json")
 	}
+	port := int(port64)
 
 	addr := fmt.Sprintf("%v:%v", host, port)
-	return (addr, nil)
+	return addr, nil
 }
 
 func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
@@ -4906,13 +4919,14 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		if len(addrAndPort) < 2 {
 			return allReplicaReady, errors.New("Can't get TiFlash Address from PD")
 		}
-		_, err := GetTiflashHttpAddr(addrAndPort[0], store.Store.StatusAddress)
+		httpAddr, err := GetTiflashHttpAddr(addrAndPort[0], store.Store.StatusAddress)
 		if err != nil {
 			return allReplicaReady, errors.Trace(err)
 		}
+		fmt.Printf("httpAddr is %v\n", httpAddr)
 		// report to pd
 		// TODO How to update?
-
+		
 	}
 
 
@@ -4950,7 +4964,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 	if err != nil {
 		return allReplicaReady, errors.Trace(err)
 	}
-	var allRules map[string]placement.Rule
+	allRules := make(map[string]placement.Rule)
 	for _, r := range allRulesArr {
 		allRules[r.ID] = r
 	}
@@ -4967,10 +4981,16 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		if ok {
 			match, ruleNew := isRuleMatch(rule, tb)
 			if !match {
+				fmt.Printf("Set rule %v\n", ruleNew)
 				tikvHelper.SetPlacementRule(*ruleNew)
 			}
+		} else{
+			ruleNew := MakeNewRule(tb)
+			fmt.Printf("Set new rule %v\n", ruleNew)
+			tikvHelper.SetPlacementRule(*ruleNew)
 		}
 
+		fmt.Printf("Table %v Available is %v\n", tb.ID, tb.TableInfo.TiFlashReplica.Available)
 		if !tb.TableInfo.TiFlashReplica.Available {
 			allReplicaReady = false
 
@@ -5003,6 +5023,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 				if err != nil {
 					return allReplicaReady, errors.Trace(err)
 				}
+				fmt.Printf("find total n %v\n", n)
 				for i := int64(0); i < n; i++ {
 					rs, _, _ := reader.ReadLine()
 					// for (`table`, `store`), has region `r`
@@ -5052,7 +5073,6 @@ func (d *ddl) AlterTableSetTiFlashReplica(ctx sessionctx.Context, ident ast.Iden
 	} else if tb.Meta().TempTableType != model.TempTableNone {
 		return ErrOptOnTemporaryTable.GenWithStackByArgs("set tiflash replica")
 	}
-	d.PollTiFlashReplicaStatus(ctx)
 	tbReplicaInfo := tb.Meta().TiFlashReplica
 	if tbReplicaInfo != nil && tbReplicaInfo.Count == replicaInfo.Count &&
 		len(tbReplicaInfo.LocationLabels) == len(replicaInfo.Labels) {

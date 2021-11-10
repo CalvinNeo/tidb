@@ -949,10 +949,13 @@ func (h *Helper) SetPlacementRule(rule placement.Rule) error {
 		util.InternalHTTPSchema(),
 		pdAddrs[0],
 	)
-	resp, err := util.InternalHTTPClient().Post(postURL, "application/json", bytes.NewBuffer(m))
+	buf := bytes.NewBuffer(m)
+	fmt.Printf("PD request %v\n", buf)
+	resp, err := util.InternalHTTPClient().Post(postURL, "application/json", buf)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("PD returns %v\n", resp)
 	defer func() {
 		if err = resp.Body.Close(); err != nil {
 			log.Error("err", zap.Error(err))

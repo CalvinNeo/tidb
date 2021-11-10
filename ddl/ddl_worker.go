@@ -136,19 +136,27 @@ func (pw *pollWorker) start(d *ddlCtx){
 	}
 	defer pw.sessPool.put(sctx)
 	fmt.Println(sctx)
-	for {
-		// poll status
-		// ...
+	go func() {
+		for {
+			// poll status
+			// ...
 
 
-		//if err := pw.ddl.CreateSchema(sctx, model.NewCIStr("testschema"), nil, nil, nil); err!= nil {
-		//	fmt.Println("internal create table fail")
-		//	panic(err)
-		//}
-		// just test success
-		fmt.Println("internal create table success")
-		break
-	}
+			//if err := pw.ddl.CreateSchema(sctx, model.NewCIStr("testschema"), nil, nil, nil); err!= nil {
+			//	fmt.Println("internal create table fail")
+			//	panic(err)
+			//}
+
+			err := pw.ddl.PollTiFlashReplicaStatus(sctx)
+			if err != nil {
+				fmt.Println("Err %v\n", err)
+			}
+			// just test success
+			fmt.Println("internal create table success")
+			time.Sleep(2 * time.Second)
+			//break
+		}
+	}()
 }
 
 func (pw *pollWorker) close(){
