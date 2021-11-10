@@ -4923,10 +4923,11 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		if err != nil {
 			return allReplicaReady, errors.Trace(err)
 		}
-		fmt.Printf("httpAddr is %v\n", httpAddr)
+		fmt.Printf("!!!! httpAddr is %v\n", httpAddr)
 		// report to pd
-		// TODO How to update?
-		
+		// TODO How to update? Need etcd leader address.
+		resp, err := d.etcdCli.Get(d.ctx, fmt.Sprintf("cluster/http_port/%v", store.Store.Address))
+		fmt.Printf("!!!! resp is {}", resp)
 	}
 
 
@@ -4960,6 +4961,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 	// TODO should we cover getDropOrTruncateTableTiflash
 
 	// compute all_rules
+	// TODO Need async remove allRules
 	allRulesArr, err := tikvHelper.GetGroupRules("tiflash")
 	if err != nil {
 		return allReplicaReady, errors.Trace(err)
@@ -4982,12 +4984,12 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 			match, ruleNew := isRuleMatch(rule, tb)
 			if !match {
 				fmt.Printf("Set rule %v\n", ruleNew)
-				tikvHelper.SetPlacementRule(*ruleNew)
+				//tikvHelper.SetPlacementRule(*ruleNew)
 			}
 		} else{
 			ruleNew := MakeNewRule(tb)
 			fmt.Printf("Set new rule %v\n", ruleNew)
-			tikvHelper.SetPlacementRule(*ruleNew)
+			//tikvHelper.SetPlacementRule(*ruleNew)
 		}
 
 		fmt.Printf("Table %v Available is %v\n", tb.ID, tb.TableInfo.TiFlashReplica.Available)
