@@ -41,8 +41,11 @@ import (
 
 type PollTiFlashReplicaStatusContext struct {
 	ID           int64
-	TableInfo    *model.TableInfo
-	HighPriority bool
+	Count   uint64
+	LocationLabels []string
+	Available      bool
+	HighPriority   bool
+	//TableInfo    *model.TableInfo
 }
 
 type TiFlashReplicaStatusResult struct {
@@ -71,6 +74,7 @@ func MakeBaseRule() placement.Rule {
 }
 
 func (d *ddl) PollTiFlashReplicaStatus(ctx sessionctx.Context) error {
+	// TODO lastHandledSchemaVersionTso checking can be removed.
 	ddlGlobalSchemaVersion := 0
 
 	resp, err := d.etcdCli.Get(d.ctx, ddlutil.DDLGlobalSchemaVersion)
@@ -141,10 +145,10 @@ func isRuleMatch(rule placement.Rule, tb PollTiFlashReplicaStatusContext) (bool,
 			isMatch = false
 		}
 
-		if len(rule.LocationLabels) != len(tb.TableInfo.TiFlashReplica.LocationLabels) {
+		if len(rule.LocationLabels) != len(tb.LocationLabels) {
 			isMatch = false
 		} else {
-			for i, lb := range tb.TableInfo.TiFlashReplica.LocationLabels {
+			for i, lb := range tb.LocationLabels {
 				if lb != rule.LocationLabels[i] {
 					isMatch = false
 					break
@@ -152,7 +156,7 @@ func isRuleMatch(rule placement.Rule, tb PollTiFlashReplicaStatusContext) (bool,
 			}
 		}
 
-		if isMatch && uint64(rule.Count) != tb.TableInfo.TiFlashReplica.Count {
+		if isMatch && uint64(rule.Count) != tb.Count {
 			isMatch = false
 		}
 		if isMatch && rule.Role != placement.Learner {
@@ -164,14 +168,14 @@ func isRuleMatch(rule placement.Rule, tb PollTiFlashReplicaStatusContext) (bool,
 	if isMatch {
 		return true, nil
 	} else {
-		return false, MakeNewRule(tb)
+		return false, MakeNewRule(tb.ID, tb.Count, tb.LocationLabels)
 	}
 }
 
-func MakeNewRule(tb PollTiFlashReplicaStatusContext) *placement.Rule {
-	ruleId := fmt.Sprintf("table-%v-r", tb.ID)
-	startKey := tablecodec.GenTableRecordPrefix(tb.ID)
-	endKey := tablecodec.EncodeTablePrefix(tb.ID + 1)
+func MakeNewRule(ID int64, Count uint64, LocationLabels []string) *placement.Rule {
+	ruleId := fmt.Sprintf("table-%v-r", ID)
+	startKey := tablecodec.GenTableRecordPrefix(ID)
+	endKey := tablecodec.EncodeTablePrefix(ID + 1)
 	startKey = codec.EncodeBytes([]byte{}, startKey)
 	endKey = codec.EncodeBytes([]byte{}, endKey)
 
@@ -179,8 +183,8 @@ func MakeNewRule(tb PollTiFlashReplicaStatusContext) *placement.Rule {
 	ruleNew.ID = ruleId
 	ruleNew.StartKeyHex = startKey.String()
 	ruleNew.EndKeyHex = endKey.String()
-	ruleNew.Count = int(tb.TableInfo.TiFlashReplica.Count)
-	ruleNew.LocationLabels = tb.TableInfo.TiFlashReplica.LocationLabels
+	ruleNew.Count = int(Count)
+	ruleNew.LocationLabels = LocationLabels
 
 	return &ruleNew
 }
@@ -300,7 +304,7 @@ func HandlePlacementRuleRoutine(ctx sessionctx.Context, currentSchema infoschema
 				//tikvHelper.SetPlacementRule(*ruleNew)
 			}
 		} else {
-			ruleNew := MakeNewRule(tb)
+			ruleNew := MakeNewRule(tb.ID, tb.Count, tb.LocationLabels)
 			fmt.Printf("Set new rule %v\n", ruleNew)
 			//tikvHelper.SetPlacementRule(*ruleNew)
 		}
@@ -322,14 +326,15 @@ func GetTiFlashReplicaInfo(tblInfo *model.TableInfo, tableList *[]PollTiFlashRep
 	}
 	if pi := tblInfo.GetPartitionInfo(); pi != nil {
 		for _, p := range pi.Definitions {
-			*tableList = append(*tableList, PollTiFlashReplicaStatusContext{p.ID, tblInfo, false})
+			*tableList = append(*tableList, PollTiFlashReplicaStatusContext{p.ID,
+				tblInfo.TiFlashReplica.Count, tblInfo.TiFlashReplica.LocationLabels, tblInfo.TiFlashReplica.IsPartitionAvailable(p.ID), false})
 		}
 		// partitions that in adding mid-state
 		for _, p := range pi.AddingDefinitions {
-			*tableList = append(*tableList, PollTiFlashReplicaStatusContext{p.ID, tblInfo, true})
+			*tableList = append(*tableList, PollTiFlashReplicaStatusContext{p.ID, tblInfo.TiFlashReplica.Count, tblInfo.TiFlashReplica.LocationLabels, tblInfo.TiFlashReplica.IsPartitionAvailable(p.ID), true})
 		}
 	} else {
-		*tableList = append(*tableList, PollTiFlashReplicaStatusContext{tblInfo.ID, tblInfo, false})
+		*tableList = append(*tableList, PollTiFlashReplicaStatusContext{tblInfo.ID, tblInfo.TiFlashReplica.Count, tblInfo.TiFlashReplica.LocationLabels, tblInfo.TiFlashReplica.Available, false})
 	}
 }
 
@@ -343,11 +348,22 @@ func (d *ddl) UpdateTiFlashHttpAddress(store *helper.StoreStat) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	fmt.Printf("!!!! httpAddr is %v\n", httpAddr)
 	// report to pd
-	// TODO How to update? Need etcd leader address.
-	resp, err := d.etcdCli.Get(d.ctx, fmt.Sprintf("cluster/http_port/%v", store.Store.Address))
-	fmt.Printf("!!!! resp is {}", resp)
+	key := fmt.Sprintf("/tiflash/cluster/http_port/%v", store.Store.Address)
+	resp, err := d.etcdCli.Get(d.ctx, key)
+	origin := ""
+	for _, kv := range resp.Kvs {
+		if string(kv.Key) == key {
+			origin = string(kv.Value)
+			break
+		}
+	}
+	fmt.Printf("!!!! httpAddr key %v origin %v \n", httpAddr, origin)
+	if origin != httpAddr {
+		// TODO add lease ttl
+		d.etcdCli.Put(d.ctx, key, httpAddr)
+	}
+
 	return nil
 }
 
@@ -402,8 +418,8 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		// for every region in each table, if it has one replica, we reckon it ready
 		// TODO Can we batch request table?
 
-		fmt.Printf("Table %v Available is %v\n", tb.ID, tb.TableInfo.TiFlashReplica.Available)
-		if !tb.TableInfo.TiFlashReplica.Available {
+		fmt.Printf("Table %v Available is %v\n", tb.ID, tb.Available)
+		if !tb.Available {
 			allReplicaReady = false
 
 			// set_accelerate_schedule
@@ -462,7 +478,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 			available := regionCount == flashRegionCount
 			fmt.Printf("GetPDRegionStats output table %v RegionCount %v FlashRegionCount %v %v\n", tb.ID, regionCount, flashRegionCount, stats)
 
-			d.UpdateTableReplicaInfo(ctx, tb.TableInfo.ID, available)
+			d.UpdateTableReplicaInfo(ctx, tb.ID, available)
 		}
 	}
 
@@ -482,8 +498,18 @@ func (d *ddl) AlterTableSetTiFlashReplica(ctx sessionctx.Context, ident ast.Iden
 		return ErrOptOnTemporaryTable.GenWithStackByArgs("set tiflash replica")
 	}
 
+	tikvStore, ok := ctx.GetStore().(helper.Storage)
+	if !ok {
+		return errors.New("Can not get Helper")
+	}
+	tikvHelper := &helper.Helper{
+		Store:       tikvStore,
+		RegionCache: tikvStore.GetRegionCache(),
+	}
 	for retry := 0; retry < 3; retry++ {
-
+		ruleNew := MakeNewRule(tb.Meta().ID, replicaInfo.Count, replicaInfo.Labels)
+		fmt.Printf("Set new rule %v\n", ruleNew)
+		tikvHelper.SetPlacementRule(*ruleNew)
 	}
 
 	tbReplicaInfo := tb.Meta().TiFlashReplica
