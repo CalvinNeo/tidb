@@ -1225,6 +1225,7 @@ func updateVersionAndTableInfo(t *meta.Meta, job *model.Job, tblInfo *model.Tabl
 	if tblInfo.State == model.StatePublic {
 		tblInfo.UpdateTS = t.StartTS
 	}
+
 	return ver, t.UpdateTable(job.SchemaID, tblInfo)
 }
 

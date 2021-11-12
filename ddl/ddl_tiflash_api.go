@@ -300,20 +300,21 @@ func HandlePlacementRuleRoutine(ctx sessionctx.Context, currentSchema infoschema
 		if ok {
 			match, ruleNew := isRuleMatch(rule, tb)
 			if !match {
-				fmt.Printf("Set rule %v\n", ruleNew)
+				fmt.Printf("!!!! Set rule %v\n", ruleNew)
 				//tikvHelper.SetPlacementRule(*ruleNew)
 			}
+			delete(allRules, ruleId)
 		} else {
 			ruleNew := MakeNewRule(tb.ID, tb.Count, tb.LocationLabels)
-			fmt.Printf("Set new rule %v\n", ruleNew)
-			//tikvHelper.SetPlacementRule(*ruleNew)
+			fmt.Printf("!!!! Set new rule %v\n", ruleNew)
+			tikvHelper.SetPlacementRule(*ruleNew)
 		}
-		delete(allRules, ruleId)
 	}
 
 	// remove rules of non-existing table
 	for _, v := range allRules {
-		tikvHelper.DeletePlacementRule("tiflash", v.ID)
+		fmt.Printf("!!!! Remove rule %v\n", v.ID)
+		//tikvHelper.DeletePlacementRule("tiflash", v.ID)
 	}
 
 	return nil
@@ -403,8 +404,8 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 
 	// compute table_list
 	var tableList []PollTiFlashReplicaStatusContext = make([]PollTiFlashReplicaStatusContext, 0)
+
 	for _, db := range schema.AllSchemas() {
-		fmt.Printf("PollTiFlashReplicaStatus has db %v\n", db.Name)
 		tbls := schema.SchemaTables(db.Name)
 		for _, tbl := range tbls {
 			tblInfo := tbl.Meta()
@@ -412,6 +413,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		}
 	}
 
+	HandlePlacementRuleRoutine(ctx, schema, tikvHelper, tableList)
 	// Removed pd rule handling to somewhere else
 
 	for _, tb := range tableList {
@@ -506,11 +508,6 @@ func (d *ddl) AlterTableSetTiFlashReplica(ctx sessionctx.Context, ident ast.Iden
 		Store:       tikvStore,
 		RegionCache: tikvStore.GetRegionCache(),
 	}
-	for retry := 0; retry < 3; retry++ {
-		ruleNew := MakeNewRule(tb.Meta().ID, replicaInfo.Count, replicaInfo.Labels)
-		fmt.Printf("Set new rule %v\n", ruleNew)
-		tikvHelper.SetPlacementRule(*ruleNew)
-	}
 
 	tbReplicaInfo := tb.Meta().TiFlashReplica
 	if tbReplicaInfo != nil && tbReplicaInfo.Count == replicaInfo.Count &&
@@ -530,6 +527,20 @@ func (d *ddl) AlterTableSetTiFlashReplica(ctx sessionctx.Context, ident ast.Iden
 	err = checkTiFlashReplicaCount(ctx, replicaInfo.Count)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	// TODO maybe we should move into `updateVersionAndTableInfo`, since it can fail, and we shall rollback
+	setRuleOk := false
+	for retry := 0; retry < 3; retry++ {
+		ruleNew := MakeNewRule(tb.Meta().ID, replicaInfo.Count, replicaInfo.Labels)
+		fmt.Printf("Set new rule %v\n", ruleNew)
+		if tikvHelper.SetPlacementRule(*ruleNew) == nil {
+			setRuleOk = true
+			break
+		}
+	}
+	if setRuleOk == false {
+		return errors.New("Can not set placement rule for TiFlash")
 	}
 
 	job := &model.Job{
