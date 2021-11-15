@@ -127,7 +127,7 @@ func newPollWorker (ddl *ddl, ctx context.Context, tp workerType, sessPool *sess
 
 func (pw *pollWorker) start(d *ddlCtx){
 	defer pw.wg.Done()
-	fmt.Println("poll worker start")
+	fmt.Println("!!!! poll worker start")
 	// do something
 	// when get the right time
 	sctx, err := pw.sessPool.get()
@@ -154,13 +154,13 @@ func (pw *pollWorker) start(d *ddlCtx){
 			// just test success
 			fmt.Println("internal create table success")
 			time.Sleep(3 * time.Second)
-			break
+			//break
 		}
 	}()
 }
 
 func (pw *pollWorker) close(){
-	fmt.Println("poll worker close")
+	fmt.Println("!!!! poll worker close")
 	pw.wg.Wait()
 }
 

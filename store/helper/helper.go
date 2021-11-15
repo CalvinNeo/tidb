@@ -901,7 +901,7 @@ func (h *Helper) GetPDRegionStats(tableID int64, stats *PDRegionStats) error {
 	}()
 
 	data, err := ioutil.ReadAll(resp.Body)
-	fmt.Printf("GetPDRegionStats return %v\n", string(data))
+	fmt.Printf("!!!! GetPDRegionStats return %v\n", string(data))
 	dec := json.NewDecoder(resp.Body)
 
 	return dec.Decode(stats)
@@ -1025,7 +1025,7 @@ func (h *Helper) PostAccelerateSchedule(tableID int64) error {
 		util.InternalHTTPSchema(),
 		pdAddrs[0])
 
-	fmt.Printf("%v", postURL)
+	fmt.Printf("!!!! PostAccelerateSchedule %v\n", postURL)
 
 	if err != nil {
 		return err
@@ -1067,7 +1067,7 @@ func (h *Helper) GetPDRegionStats2(tableID int64, stats *PDRegionStats) error {
 		url.QueryEscape(string(startKey)),
 		url.QueryEscape(string(endKey)))
 
-	fmt.Printf("startUrl %v\n", statURL)
+	fmt.Printf("!!!! startUrl %v\n", statURL)
 
 	resp, err := util.InternalHTTPClient().Get(statURL)
 	if err != nil {

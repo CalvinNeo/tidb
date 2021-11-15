@@ -307,7 +307,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		for _, l := range store.Store.Labels {
 			if l.Key == "engine" && l.Value == "tiflash" {
 				tiflashStores[store.Store.ID] = store
-				fmt.Printf("tiflashStores has tiflash %v %v\n", store.Store.ID, store.Store.Address)
+				fmt.Printf("!!!! tiflashStores has tiflash %v %v\n", store.Store.ID, store.Store.Address)
 			}
 		}
 	}
@@ -333,12 +333,12 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 
 	// Removed pd rule handling to somewhere else
 	HandlePlacementRuleRoutine(ctx, d, tableList)
-	
+
 	for _, tb := range tableList {
 		// for every region in each table, if it has one replica, we reckon it ready
 		// TODO Can we batch request table?
 
-		fmt.Printf("Table %v Available is %v\n", tb.ID, tb.Available)
+		fmt.Printf("!!!! Table %v Available is %v\n", tb.ID, tb.Available)
 		if !tb.Available {
 			allReplicaReady = false
 
@@ -355,7 +355,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 					store.Store.StatusAddress,
 					tb.ID,
 				)
-				fmt.Printf("startUrl %v\n", statURL)
+				fmt.Printf("!!!! startUrl %v\n", statURL)
 				resp, err := util.InternalHTTPClient().Get(statURL)
 				if err != nil {
 					continue
@@ -371,7 +371,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 				if err != nil {
 					return allReplicaReady, errors.Trace(err)
 				}
-				fmt.Printf("find total n %v\n", n)
+				fmt.Printf("!!!! find total n %v\n", n)
 				for i := int64(0); i < n; i++ {
 					rs, _, _ := reader.ReadLine()
 					// for (`table`, `store`), has region `r`
@@ -379,7 +379,8 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 					if err != nil {
 						return allReplicaReady, errors.Trace(err)
 					}
-					fmt.Printf("find replica %v\n", r)
+					fmt.Printf("!!!! find replica %v\n", r)
+					fmt.Printf("!!!! find replica %v\n", r)
 					if i, ok := regionReplica[r]; ok {
 						regionReplica[r] = i + 1
 					} else {
@@ -392,7 +393,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 			// TODO Is it necessary, or we can get from TiDB?
 			var stats helper.PDRegionStats
 			if err = tikvHelper.GetPDRegionStats2(tb.ID, &stats); err != nil {
-				fmt.Printf("err %v", err)
+				fmt.Printf("!!!! err %v", err)
 			}
 
 			regionCount := stats.Count
@@ -451,7 +452,7 @@ func (d *ddl) AlterTableSetTiFlashReplica(ctx sessionctx.Context, ident ast.Iden
 
 	// TODO maybe we should move into `updateVersionAndTableInfo`, since it can fail, and we shall rollback
 	setRuleOk := false
-	for retry := 0; retry < 3; retry++ {
+	for retry := 0; retry < 2; retry++ {
 		ruleNew := MakeNewRule(tb.Meta().ID, replicaInfo.Count, replicaInfo.Labels)
 		fmt.Printf("Set new rule %v\n", ruleNew)
 		if tikvHelper.SetPlacementRule(*ruleNew) == nil {
@@ -579,7 +580,7 @@ func HandlePlacementRuleRoutine(ctx sessionctx.Context, d *ddl, tableList []Poll
 		allRules[r.ID] = r
 	}
 
-	fmt.Printf("allRules is %v\n", allRules)
+	fmt.Printf("!!!! allRules is %v\n", allRules)
 
 	// Cover getDropOrTruncateTableTiflash
 	GetDropOrTruncateTableTiflash(ctx, currentSchema, tikvHelper, &tableList)
