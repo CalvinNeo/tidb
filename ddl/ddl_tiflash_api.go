@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/ddl/placement"
 	ddlutil "github.com/pingcap/tidb/ddl/util"
-	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/sessionctx"
@@ -229,96 +228,7 @@ func GetTiflashHttpAddr(host string, statusAddr string) (string, error) {
 	return addr, nil
 }
 
-//func GetDropOrTruncateTableTiflash(currentSchema infoschema.InfoSchema, tikvHelper *helper.Helper, replicaInfos *[]PollTiFlashReplicaStatusContext) error {
-//s, err := session.CreateSession(tikvHelper.Store)
-//if err != nil {
-//	return errors.Trace(err)
-//}
-//defer s.Close()
-//
-//store := domain.GetDomain(s).Store()
-//txn, err := store.Begin()
-//if err != nil {
-//	return errors.Trace(err)
-//}
-//gcSafePoint, err := gcutil.GetGCSafePoint(s)
-//if err != nil {
-//	return err
-//}
-//uniqueIDMap := make(map[int64]struct{})
-//handleJobAndTableInfo := func(job *model.Job, tblInfo *model.TableInfo) (bool, error) {
-//	// Avoid duplicate table ID info.
-//	if _, ok := currentSchema.TableByID(tblInfo.ID); ok {
-//		return false, nil
-//	}
-//	if _, ok := uniqueIDMap[tblInfo.ID]; ok {
-//		return false, nil
-//	}
-//	uniqueIDMap[tblInfo.ID] = struct{}{}
-//	GetTiFlashReplicaInfo(tblInfo, replicaInfos)
-//	return false, nil
-//}
-//dom := domain.GetDomain(s)
-//fn := func(jobs []*model.Job) (bool, error) {
-//	return executor.GetDropOrTruncateTableInfoFromJobs(jobs, gcSafePoint, dom, handleJobAndTableInfo)
-//}
-//
-//err = admin.IterAllDDLJobs(txn, fn)
-//if err != nil {
-//	if terror.ErrorEqual(variable.ErrSnapshotTooOld, err) {
-//		// The err indicate that current ddl job and remain DDL jobs was been deleted by GC,
-//		// just ignore the error and return directly.
-//		return nil
-//	}
-//	return err
-//}
-//	return nil
-//}
 
-func HandlePlacementRuleRoutine(ctx sessionctx.Context, currentSchema infoschema.InfoSchema, tikvHelper *helper.Helper, tableList []PollTiFlashReplicaStatusContext) error {
-	// compute all_rules
-	// TODO Need async remove allRules
-	allRulesArr, err := tikvHelper.GetGroupRules("tiflash")
-	if err != nil {
-		return errors.Trace(err)
-	}
-	allRules := make(map[string]placement.Rule)
-	for _, r := range allRulesArr {
-		allRules[r.ID] = r
-	}
-
-	fmt.Printf("allRules is %v\n", allRules)
-
-	// Cover getDropOrTruncateTableTiflash
-	//GetDropOrTruncateTableTiflash(currentSchema, tikvHelper, &tableList)
-	for _, tb := range tableList {
-		// for every region in each table, if it has one replica, we reckon it ready
-		// TODO Can we batch request table?
-		// implement _check_and_make_rule
-		ruleId := fmt.Sprintf("table-%v-r", tb.ID)
-		rule, ok := allRules[ruleId]
-		if ok {
-			match, ruleNew := isRuleMatch(rule, tb)
-			if !match {
-				fmt.Printf("!!!! Set rule %v\n", ruleNew)
-				//tikvHelper.SetPlacementRule(*ruleNew)
-			}
-			delete(allRules, ruleId)
-		} else {
-			ruleNew := MakeNewRule(tb.ID, tb.Count, tb.LocationLabels)
-			fmt.Printf("!!!! Set new rule %v\n", ruleNew)
-			tikvHelper.SetPlacementRule(*ruleNew)
-		}
-	}
-
-	// remove rules of non-existing table
-	for _, v := range allRules {
-		fmt.Printf("!!!! Remove rule %v\n", v.ID)
-		//tikvHelper.DeletePlacementRule("tiflash", v.ID)
-	}
-
-	return nil
-}
 
 func GetTiFlashReplicaInfo(tblInfo *model.TableInfo, tableList *[]PollTiFlashReplicaStatusContext) {
 	if tblInfo.TiFlashReplica == nil {
@@ -413,7 +323,7 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 		}
 	}
 
-	HandlePlacementRuleRoutine(ctx, schema, tikvHelper, tableList)
+	//HandlePlacementRuleRoutine(ctx, schema, tikvHelper, tableList)
 	// Removed pd rule handling to somewhere else
 
 	for _, tb := range tableList {
@@ -470,6 +380,8 @@ func (d *ddl) TiFlashReplicaTableUpdate(ctx sessionctx.Context) (bool, error) {
 				}
 			}
 
+
+			// TODO Is it necessary, or we can get from TiDB?
 			var stats helper.PDRegionStats
 			if err = tikvHelper.GetPDRegionStats2(tb.ID, &stats); err != nil {
 				fmt.Printf("err %v", err)
