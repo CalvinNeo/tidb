@@ -135,7 +135,7 @@ const (
 	gcLastRunTimeKey       = "tikv_gc_last_run_time"
 	gcRunIntervalKey       = "tikv_gc_run_interval"
 	gcDefaultRunInterval   = time.Minute * 10
-	gcWaitTime             = time.Minute * 1
+	gcDefaultWaitTime             = time.Minute * 1
 	gcRedoDeleteRangeDelay = 24 * time.Hour
 
 	gcLifeTimeKey        = "tikv_gc_life_time"
@@ -176,6 +176,7 @@ const (
 )
 
 var gcSafePointCacheInterval = tikv.GcSafePointCacheInterval
+var gcWaitTime = gcDefaultWaitTime
 
 var gcVariableComments = map[string]string{
 	gcLeaderUUIDKey:      "Current GC worker leader UUID. (DO NOT EDIT)",
@@ -206,6 +207,16 @@ func SetGcSafePointCacheInterval(interval time.Duration) {
 // GetGcSafePointCacheInterval returns gc interval.
 func GetGcSafePointCacheInterval() time.Duration {
 	return gcSafePointCacheInterval
+}
+
+// SetGcSafePointCacheInterval can modify gc interval for test.
+func SetGcWaitTime(interval time.Duration) {
+	gcWaitTime = interval
+}
+
+// GetGcSafePointCacheInterval returns gc interval.
+func GetGcWaitTime() time.Duration {
+	return gcWaitTime
 }
 
 func (w *GCWorker) start(ctx context.Context, wg *sync.WaitGroup) {

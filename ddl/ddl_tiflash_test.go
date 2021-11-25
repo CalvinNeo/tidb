@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/store/gcworker"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -60,6 +61,7 @@ type tiflashDDLTestSuite struct {
 	pdEnabled    bool
 	startTime    time.Time
 	tiflash      mockTiFlash
+	cluster *unistore.Cluster
 }
 
 var _ = SerialSuites(&tiflashDDLTestSuite{})
@@ -80,6 +82,7 @@ func (s *tiflashDDLTestSuite) SetUpSuite(c *C) {
 				mockCluster.AddPeer(region1, store2, peer2)
 				tiflashIdx++
 			}
+			s.cluster = mockCluster
 		}),
 		mockstore.WithStoreType(mockstore.EmbedUnistore),
 	)
@@ -326,6 +329,66 @@ func (s *tiflashDDLTestSuite) TestSetPlacementRuleNormal(c *C) {
 	expectRule = ddl.MakeNewRule(tb.Meta().ID, 1, []string{"a", "b"})
 	res = s.CheckPlacementRule(*expectRule)
 	c.Assert(res, Equals, true)
+
+	// Wait GC
+	time.Sleep(ddl.PollTiFlashInterval * 5)
+	res = s.CheckPlacementRule(*expectRule)
+	c.Assert(res, Equals, false)
+}
+
+// When gc worker works, it will automatically remove pd rule for TiFlash.
+func (s *tiflashDDLTestSuite) TestSetPlacementRuleWithGCWorker(c *C) {
+	_, pdClient, cluster, err := unistore.New("")
+	for _, s := range s.cluster.GetAllStores() {
+		cluster.AddStore(s.Id, s.Address, s.Labels...)
+	}
+
+	c.Assert(err, IsNil)
+	gcWorker, err := gcworker.NewGCWorker(s.store, pdClient)
+	c.Assert(err, IsNil)
+
+	tk := testkit.NewTestKit(c, s.store)
+	tk.MustExec("use test")
+	tk.MustExec("drop table if exists ddltiflash")
+	tk.MustExec("create table ddltiflash(z int)")
+	tk.MustExec("alter table ddltiflash set tiflash replica 1 location labels 'a','b'")
+	tb, err := s.dom.InfoSchema().TableByName(model.NewCIStr("test"), model.NewCIStr("ddltiflash"))
+	c.Assert(err, IsNil)
+
+	expectRule := ddl.MakeNewRule(tb.Meta().ID, 1, []string{"a", "b"})
+	res := s.CheckPlacementRule(*expectRule)
+	c.Assert(res, Equals, true)
+
+	originValue := ddl.PullTiFlashPdTick
+	ddl.PullTiFlashPdTick = 1000
+	defer func() {
+		ddl.PullTiFlashPdTick = originValue
+	}()
+
+	gcworker.SetGcWaitTime(time.Second)
+	gcworker.SetGcSafePointCacheInterval(time.Second)
+
+	// Set lastSafePoint to previous timestamp, so `calcNewSafePoint` shall trigger gc.
+	// drop table -> lastSavePoint ->(before) safePoint
+	// safePoint is now - tikv_gc_life_time(10min)
+	// This timestamp should also after table is dropped.
+	gcTimeFormat := "20060102-15:04:05 -0700 MST"
+	now := time.Now()
+	fmt.Printf("!!!! now %v\n", now.Format("2006-01-02-15-04-05"))
+	lastSavePoint := now.Add(0 + 1 *time.Second)
+	safePointSQL := `INSERT HIGH_PRIORITY INTO mysql.tidb VALUES ('tikv_gc_safe_point', '%[1]s', ''),('tikv_gc_enable','true','')
+                              ON DUPLICATE KEY
+                              UPDATE variable_value = '%[1]s'`
+	tk.MustExec(fmt.Sprintf(safePointSQL, lastSavePoint.Format(gcTimeFormat)))
+
+	tk.MustExec("drop table ddltiflash")
+	time.Sleep(5 * time.Second)
+	fmt.Printf("!!!! lastSavePoint %v\n", lastSavePoint.Format("2006-01-02-15-04-05"))
+	fmt.Printf("!!!! now2(shoule be safePoint) %v\n", time.Now().Format("2006-01-02-15-04-05"))
+	// Now gc will trigger, and will remove dropped table.
+
+	gcWorker.Start()
+	defer gcWorker.Close()
 
 	// Wait GC
 	time.Sleep(ddl.PollTiFlashInterval * 5)
