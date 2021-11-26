@@ -461,7 +461,12 @@ func doInsert(ctx context.Context, s sqlexec.SQLExecutor, jobID int64, elementID
 	// clear session disk full opt
 	s.ClearDiskFullOpt()
 	rs1, err := s.ExecuteInternal(context.TODO(), "SELECT count(*) FROM mysql.gc_delete_range")
-	fmt.Printf("!!!! rs1 %v\n", rs1)
+	chk := rs1.NewChunk(nil)
+	err = rs1.Next(ctx, chk)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("!!!! rs1 %v\n", chk)
 	rs2, err := s.ExecuteInternal(context.TODO(), "SELECT HIGH_PRIORITY * FROM mysql.gc_delete_range_done")
 	fmt.Printf("!!!! rs2 %v\n", rs2)
 

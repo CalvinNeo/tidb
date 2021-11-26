@@ -717,6 +717,11 @@ func (w *GCWorker) deleteRanges(ctx context.Context, safePoint uint64, concurren
 
 	se := createSession(w.store)
 	ranges, err := util.LoadDeleteRanges(se, safePoint)
+	rs1, err := se.ExecuteInternal(context.TODO(), "SELECT * FROM mysql.gc_delete_range_done")
+	chk := rs1.NewChunk(nil)
+	err = rs1.Next(ctx, chk)
+	fmt.Printf("!!!! deleteRanges rs1 %v %v\n", rs1, chk)
+
 	se.Close()
 	if err != nil {
 		return errors.Trace(err)
