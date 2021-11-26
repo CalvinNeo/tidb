@@ -17,6 +17,8 @@ package ddl
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"github.com/tikv/client-go/v2/oracle"
 	"math"
 	"strings"
 	"sync"
@@ -451,12 +453,20 @@ func doInsert(ctx context.Context, s sqlexec.SQLExecutor, jobID int64, elementID
 	logutil.BgLogger().Info("[ddl] insert into delete-range table", zap.Int64("jobID", jobID), zap.Int64("elementID", elementID))
 	startKeyEncoded := hex.EncodeToString(startKey)
 	endKeyEncoded := hex.EncodeToString(endKey)
+	fmt.Printf("!!!! oracle.GetTimeFromTS(safePointValue) %v\n", oracle.GetTimeFromTS(ts))
 	// set session disk full opt
 	// TODO ddl txn func including an session pool txn, there may be a problem?
 	s.SetDiskFullOpt(kvrpcpb.DiskFullOpt_AllowedOnAlmostFull)
 	_, err := s.ExecuteInternal(ctx, insertDeleteRangeSQL, jobID, elementID, startKeyEncoded, endKeyEncoded, ts)
 	// clear session disk full opt
 	s.ClearDiskFullOpt()
+	rs1, err := s.ExecuteInternal(context.TODO(), "SELECT count(*) FROM mysql.gc_delete_range")
+	fmt.Printf("!!!! rs1 %v\n", rs1)
+	rs2, err := s.ExecuteInternal(context.TODO(), "SELECT HIGH_PRIORITY * FROM mysql.gc_delete_range_done")
+	fmt.Printf("!!!! rs2 %v\n", rs2)
+
+	rs, err := s.ExecuteInternal(context.TODO(), "SELECT HIGH_PRIORITY job_id, element_id, start_key, end_key FROM mysql.gc_delete_range")
+	fmt.Printf("!!!! rs %v\n", rs)
 	return errors.Trace(err)
 }
 

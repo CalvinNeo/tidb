@@ -382,6 +382,7 @@ func (s *tiflashDDLTestSuite) TestSetPlacementRuleWithGCWorker(c *C) {
 	tk.MustExec(fmt.Sprintf(safePointSQL, lastSavePoint.Format(gcTimeFormat)))
 
 	tk.MustExec("drop table ddltiflash")
+
 	time.Sleep(5 * time.Second)
 	fmt.Printf("!!!! lastSavePoint %v\n", lastSavePoint.Format("2006-01-02-15-04-05"))
 	fmt.Printf("!!!! now2(shoule be safePoint) %v\n", time.Now().Format("2006-01-02-15-04-05"))

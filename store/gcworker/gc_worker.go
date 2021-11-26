@@ -575,15 +575,18 @@ func (w *GCWorker) validateGCLifeTime(lifeTime time.Duration) (time.Duration, er
 }
 
 func (w *GCWorker) calcNewSafePoint(ctx context.Context, now time.Time) (*time.Time, uint64, error) {
-	lifeTime, err := w.loadDurationWithDefault(gcLifeTimeKey, gcDefaultLifeTime)
-	if err != nil {
-		return nil, 0, errors.Trace(err)
-	}
-	*lifeTime, err = w.validateGCLifeTime(*lifeTime)
-	if err != nil {
-		return nil, 0, err
-	}
-	metrics.GCConfigGauge.WithLabelValues(gcLifeTimeKey).Set(lifeTime.Seconds())
+	//lifeTime, err := w.loadDurationWithDefault(gcLifeTimeKey, gcDefaultLifeTime)
+	//if err != nil {
+	//	return nil, 0, errors.Trace(err)
+	//}
+	//*lifeTime, err = w.validateGCLifeTime(*lifeTime)
+	//if err != nil {
+	//	return nil, 0, err
+	//}
+	//metrics.GCConfigGauge.WithLabelValues(gcLifeTimeKey).Set(lifeTime.Seconds())
+
+	pl := time.Second
+	lifeTime := &pl
 
 	lastSafePoint, err := w.loadTime(gcSafePointKey)
 	if err != nil {
