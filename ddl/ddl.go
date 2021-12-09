@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/tidb/store/helper"
-
 	"github.com/pingcap/log"
 
 	"github.com/google/uuid"
@@ -367,6 +365,9 @@ func (d *ddl) newDeleteRangeManager(mock bool) delRangeManager {
 	return delRangeMgr
 }
 
+
+var pollTiflashContext *PollTiFlashContext = NewPollTiFlashContext()
+
 // Start implements DDL.Start interface.
 func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 	logutil.BgLogger().Info("[ddl] start DDL", zap.String("ID", d.uuid), zap.Bool("runWorker", RunWorker))
@@ -413,14 +414,7 @@ func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 	metrics.DDLCounter.WithLabelValues(metrics.CreateDDLInstance).Inc()
 
 	go func() {
-		_, ok := d.store.(helper.Storage)
-		if !ok {
-			log.Error("failed to get store for PollTiFlashReplicaStatus")
-			return
-		}
-
-		pollTiflashContext := NewPollTiFlashContext()
-
+		fmt.Println("Enter producer")
 		for {
 			if d.sessPool == nil {
 				log.Error("failed to get sessionPool for PollTiFlashReplicaStatus")
@@ -449,6 +443,54 @@ func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 
 			select {
 			case <-d.ctx.Done():
+				log.Info("Bye Producer")
+				return
+			case <-time.After(PollTiFlashInterval):
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			if d.sessPool == nil {
+				log.Error("failed to get sessionPool for PollTiFlashReplicaStatus")
+				return
+			}
+			if d.IsTiFlashPollEnabled() {
+				sctx, err := d.sessPool.get()
+				if err == nil {
+					if d.ownerManager.IsOwner() {
+						i := 0
+						for {
+							log.Info("Enter Consumer Loop")
+							select {
+							case elem, ok := <- pollTiflashContext.UpdateChan:
+								if ok {
+									log.Info("Get from UpdateChan", zap.Int64("tableID", elem.TableID))
+									d.UpdateTableReplicaInfo(sctx, elem.TableID, elem.Available)
+									i += 1
+									if i >= 3 {
+										break
+									}
+								}else{
+									break
+								}
+							}
+						}
+						log.Info("Quit Consumer Loop")
+					}
+					d.sessPool.put(sctx)
+				} else {
+					if sctx != nil {
+						d.sessPool.put(sctx)
+					}
+					log.Error("failed to get session for Loop", zap.Error(err))
+				}
+			}
+
+			select {
+			case <-d.ctx.Done():
+				log.Info("Bye Consumer")
 				return
 			case <-time.After(PollTiFlashInterval):
 			}

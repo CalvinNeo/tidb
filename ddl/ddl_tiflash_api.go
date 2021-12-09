@@ -64,6 +64,7 @@ type PollTiFlashBackoffElement struct {
 	Threshold int
 }
 
+// PollTiFlashBackoffContext is context for TiFlash status backoff strategy.
 type PollTiFlashBackoffContext struct {
 	MinTick  int
 	MaxTick  int
@@ -71,11 +72,18 @@ type PollTiFlashBackoffContext struct {
 	elements map[int64]*PollTiFlashBackoffElement
 }
 
+type UpdateChanElement struct {
+	TableID int64
+	Available bool
+}
+
+// PollTiFlashContext is context for TiFlash status polling strategy.
 type PollTiFlashContext struct {
 	BackoffContext PollTiFlashBackoffContext
 	TiFlashStores map[int64]helper.StoreStat
 	HandlePdCounter int
 	UpdateTiFlashStoreCounter int
+	UpdateChan chan UpdateChanElement
 }
 
 func NewPollTiFlashContext() *PollTiFlashContext{
@@ -84,6 +92,7 @@ func NewPollTiFlashContext() *PollTiFlashContext{
 		UpdateTiFlashStoreCounter: 0,
 		TiFlashStores: make(map[int64]helper.StoreStat),
 		BackoffContext: NewPollTiFlashBackoffContext(PollTiFlashBackoffMinTick, PollTiFlashBackoffMaxTick, PollTiFlashBackoffCapacity),
+		UpdateChan: make(chan UpdateChanElement),
 	}
 }
 
@@ -121,7 +130,7 @@ var (
 	// PollTiFlashBackoffMaxTick is the max tick before we try to update TiFlash replica availability for one table.
 	PollTiFlashBackoffMaxTick int = 10
 	// PollTiFlashBackoffMinTick is the min tick before we try to update TiFlash replica availability for one table.
-	PollTiFlashBackoffMinTick int = 2
+	PollTiFlashBackoffMinTick int = 1
 	// PollTiFlashBackoffCapacity is the cache size of backoff struct.
 	PollTiFlashBackoffCapacity int = 1000
 )
@@ -167,7 +176,11 @@ func (b *PollTiFlashBackoffElement) Grow(ctx *PollTiFlashBackoffContext) {
 		b.Threshold = ctx.MaxTick
 		return
 	}
-	b.Threshold *= 2
+	if b.Threshold < 8 {
+		b.Threshold += 1
+	} else {
+		b.Threshold *= 2
+	}
 	b.Counter = 1
 }
 
@@ -462,10 +475,18 @@ func (d *ddl) PollTiFlashReplicaStatus(ctx sessionctx.Context, pollTiFlashContex
 					return false, errors.Trace(err)
 				}
 			}
+
+			log.Info("Insert into UpdateChan", zap.Int64("tableID", tb.ID))
+
 			// Will call `onUpdateFlashReplicaStatus` to update `TiFlashReplica`.
-			if err := d.UpdateTableReplicaInfo(ctx, tb.ID, avail); err != nil {
-				log.Error("UpdateTableReplicaInfo error when updating TiFlash replica status", zap.Error(err))
+			pollTiflashContext.UpdateChan <- UpdateChanElement{
+				TableID: tb.ID,
+				Available: avail,
 			}
+
+			//if err := d.UpdateTableReplicaInfo(ctx, tb.ID, avail); err != nil {
+			//	log.Error("UpdateTableReplicaInfo error when updating TiFlash replica status", zap.Error(err))
+			//}
 		}
 	}
 
