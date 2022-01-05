@@ -380,7 +380,7 @@ func HandlePlacementRuleRoutine(ctx sessionctx.Context, d *ddl, tableList []TiFl
 	if err != nil {
 		return errors.Trace(err)
 	}
-	allRules := make(map[string]placement.Rule)
+	allRules := make(map[string]placement.TiFlashRule)
 	for _, r := range allRulesArr {
 		allRules[r.ID] = r
 	}
