@@ -735,7 +735,7 @@ func init() {
 }
 
 // GetDropOrTruncateTableInfoFromJobsByStore implements GetDropOrTruncateTableInfoFromJobs
-func GetDropOrTruncateTableInfoFromJobsByStore(jobs []*model.Job, gcSafePoint uint64, getTable func(uint64, int64, int64) (*model.TableInfo, error), fn func(*model.Job, *model.TableInfo) (bool, error)) (bool, error) {
+func GetDropOrTruncateTableInfoFromJobsByStore(jobs []*model.Job, gcSafePoint uint64, getTable func(uint64, int64, int64) (*model.TableInfo, error), fn func(*model.Job, *model.TableInfo) (bool, error), fnPart func(job *model.Job, tblInfo *model.TableInfo, partInfo *[]model.PartitionDefinition) (bool, error)) (bool, error) {
 	for _, job := range jobs {
 		// Check GC safe point for getting snapshot infoSchema.
 		err := gcutil.ValidateSnapshotWithGCSafePoint(job.StartTS, gcSafePoint)
@@ -756,20 +756,26 @@ func GetDropOrTruncateTableInfoFromJobsByStore(jobs []*model.Job, gcSafePoint ui
 							continue
 						}
 						p := int64(pf)
-						tbl, err := getTable(job.StartTS, job.SchemaID, p)
+						tblMain, err := getTable(job.StartTS, job.SchemaID, job.TableID)
+						var tblPart *model.PartitionDefinition = nil
+						for _, pp := range tblMain.Partition.Definitions {
+							if pp.ID == p {
+								tblPart = &pp
+								break
+							}
+						}
 						if err != nil {
 							if meta.ErrDBNotExists.Equal(err) {
-								logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 err", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
 								continue
 							}
 							return false, err
 						}
-						if tbl == nil {
-							logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 nil", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
+						if tblMain == nil {
 							continue
 						}
-						logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 found", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
-						finish, err := fn(job, tbl)
+						finish, err := fnPart(job, tblMain, &[]model.PartitionDefinition{
+							*tblPart,
+						})
 						if err != nil || finish {
 							return finish, err
 						}

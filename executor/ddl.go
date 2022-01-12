@@ -718,7 +718,10 @@ func GetDropOrTruncateTableInfoFromJobs(jobs []*model.Job, gcSafePoint uint64, d
 		tbl, err := snapMeta.GetTable(SchemaID, TableID)
 		return tbl, err
 	}
-	return ddl.GetDropOrTruncateTableInfoFromJobsByStore(jobs, gcSafePoint, getTable, fn)
+	fnPart := func(*model.Job, *model.TableInfo, *[]model.PartitionDefinition) (bool, error) {
+		return false, nil
+	}
+	return ddl.GetDropOrTruncateTableInfoFromJobsByStore(jobs, gcSafePoint, getTable, fn, fnPart)
 }
 
 func (e *DDLExec) getRecoverTableByTableName(tableName *ast.TableName) (*model.Job, *model.TableInfo, error) {

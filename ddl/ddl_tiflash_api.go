@@ -325,19 +325,28 @@ func getDropOrTruncateTableTiflash(ctx sessionctx.Context, currentSchema infosch
 		return err
 	}
 	uniqueIDMap := make(map[int64]struct{})
-	fn := func(jobs []*model.Job) (bool, error) {
-		handleJobAndTableInfo := func(job *model.Job, tblInfo *model.TableInfo) (bool, error) {
-			// Avoid duplicate table ID info.
-			if _, ok := currentSchema.TableByID(tblInfo.ID); ok {
-				return false, nil
-			}
-			if _, ok := uniqueIDMap[tblInfo.ID]; ok {
-				return false, nil
-			}
-			uniqueIDMap[tblInfo.ID] = struct{}{}
-			GetTiFlashReplicaInfo(tblInfo, replicaInfos)
+	handleJobAndTableInfo := func(job *model.Job, tblInfo *model.TableInfo) (bool, error) {
+		// Avoid duplicate table ID info.
+		if _, ok := currentSchema.TableByID(tblInfo.ID); ok {
 			return false, nil
 		}
+		if _, ok := uniqueIDMap[tblInfo.ID]; ok {
+			return false, nil
+		}
+		uniqueIDMap[tblInfo.ID] = struct{}{}
+		GetTiFlashReplicaInfo(tblInfo, replicaInfos)
+		return false, nil
+	}
+	handleJobAndPartitionInfo := func(job *model.Job, tblInfo *model.TableInfo, partInfo *[]model.PartitionDefinition) (bool, error) {
+		// Avoid duplicate table ID info.
+		for _, e := range *partInfo {
+			*replicaInfos = append(*replicaInfos, TiFlashReplicaStatus{e.ID,
+				tblInfo.TiFlashReplica.Count, tblInfo.TiFlashReplica.LocationLabels, tblInfo.TiFlashReplica.IsPartitionAvailable(e.ID), false})
+		}
+		GetTiFlashReplicaInfo(tblInfo, replicaInfos)
+		return false, nil
+	}
+	fn := func(jobs []*model.Job) (bool, error) {
 		getTable := func(StartTS uint64, SchemaID int64, TableID int64) (*model.TableInfo, error) {
 			snapMeta := meta.NewSnapshotMeta(store.GetSnapshot(kv.NewVersion(StartTS)))
 			if err != nil {
@@ -346,7 +355,7 @@ func getDropOrTruncateTableTiflash(ctx sessionctx.Context, currentSchema infosch
 			tbl, err := snapMeta.GetTable(SchemaID, TableID)
 			return tbl, err
 		}
-		return GetDropOrTruncateTableInfoFromJobsByStore(jobs, gcSafePoint, getTable, handleJobAndTableInfo)
+		return GetDropOrTruncateTableInfoFromJobsByStore(jobs, gcSafePoint, getTable, handleJobAndTableInfo, handleJobAndPartitionInfo)
 	}
 
 	err = admin.IterAllDDLJobs(txn, fn)
