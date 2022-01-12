@@ -20,6 +20,7 @@ package ddl
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"sync"
@@ -741,7 +742,43 @@ func GetDropOrTruncateTableInfoFromJobsByStore(jobs []*model.Job, gcSafePoint ui
 		if err != nil {
 			return false, err
 		}
-		if job.Type != model.ActionDropTable && job.Type != model.ActionTruncateTable && job.Type != model.ActionTruncateTablePartition && job.Type != model.ActionDropTablePartition {
+
+		if job.Type == model.ActionDropTablePartition || job.Type == model.ActionTruncateTablePartition {
+			logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 arg", zap.Int("len", len(job.Args)))
+			err = json.Unmarshal(job.RawArgs, &job.Args)
+			if err == nil && len(job.Args) > 0 {
+				ps, ok := job.Args[0].([]interface{})
+				if ok {
+					logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 info", zap.Int("len", len(ps)))
+					for _, pi := range ps {
+						pf, ok := pi.(float64)
+						if !ok {
+							continue
+						}
+						p := int64(pf)
+						tbl, err := getTable(job.StartTS, job.SchemaID, p)
+						if err != nil {
+							if meta.ErrDBNotExists.Equal(err) {
+								logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 err", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
+								continue
+							}
+							return false, err
+						}
+						if tbl == nil {
+							logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 nil", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
+							continue
+						}
+						logutil.BgLogger().Info("GetDropOrTruncateTableInfoFromJobsByStore2 found", zap.Int64("db", job.SchemaID), zap.Int64("table", p))
+						finish, err := fn(job, tbl)
+						if err != nil || finish {
+							return finish, err
+						}
+					}
+				}
+			}
+		}
+
+		if job.Type != model.ActionDropTable && job.Type != model.ActionTruncateTable {
 			continue
 		}
 

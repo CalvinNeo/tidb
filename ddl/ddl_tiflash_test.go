@@ -238,7 +238,11 @@ func (s *tiflashDDLTestSuite) TestTiFlashNoRedundantPDRules(c *C) {
 	defer func() {
 		failpoint.Disable("github.com/pingcap/tidb/store/gcworker/ignoreDeleteRangeFailed")
 	}()
-	fCancelPD := s.SetPdLoop(10000)
+	ChangeGCSafePoint(tk, time.Now().Add(-24*time.Hour), "false", "10m0s")
+	defer func() {
+		ChangeGCSafePoint(tk, time.Now(), "true", "10m0s")
+	}()
+	fCancelPD := s.SetPdLoop(1)
 	defer fCancelPD()
 
 	// Clean all rules
