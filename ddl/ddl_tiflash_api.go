@@ -313,7 +313,7 @@ func (d *ddl) pollTiFlashReplicaStatus(ctx sessionctx.Context, pollTiFlashContex
 	return allReplicaReady, nil
 }
 
-func getDropOrTruncateTableTiflash(ctx sessionctx.Context, currentSchema infoschema.InfoSchema, tikvHelper *helper.Helper, replicaInfos *[]TiFlashReplicaStatus) error {
+func GetDropOrTruncateTableTiflash(ctx sessionctx.Context, currentSchema infoschema.InfoSchema, tikvHelper *helper.Helper, replicaInfos *[]TiFlashReplicaStatus) error {
 	store := tikvHelper.Store.(kv.Storage)
 
 	txn, err := store.Begin()
@@ -393,16 +393,16 @@ func HandlePlacementRuleRoutine(ctx sessionctx.Context, d *ddl, tableList []TiFl
 	}
 
 	start := time.Now()
-	// Cover getDropOrTruncateTableTiflash
+	// Cover GetDropOrTruncateTableTiflash
 	originLen := len(tableList)
 	currentSchema := d.GetInfoSchemaWithInterceptor(ctx)
-	if err := getDropOrTruncateTableTiflash(ctx, currentSchema, tikvHelper, &tableList); err != nil {
+	if err := GetDropOrTruncateTableTiflash(ctx, currentSchema, tikvHelper, &tableList); err != nil {
 		// may fail when no `tikv_gc_safe_point` available, should return in order to remove valid pd rules.
-		logutil.BgLogger().Error("getDropOrTruncateTableTiflash returns error", zap.Error(err))
+		logutil.BgLogger().Error("GetDropOrTruncateTableTiflash returns error", zap.Error(err))
 		return errors.Trace(err)
 	}
 	elapsed := time.Since(start)
-	logutil.BgLogger().Info("getDropOrTruncateTableTiflash cost", zap.Duration("time", elapsed), zap.Int("updated", len(tableList)-originLen))
+	logutil.BgLogger().Info("GetDropOrTruncateTableTiflash cost", zap.Duration("time", elapsed), zap.Int("updated", len(tableList)-originLen))
 	for _, tb := range tableList {
 		// For every region in each table, if it has one replica, we reckon it ready.
 		ruleID := fmt.Sprintf("table-%v-r", tb.ID)

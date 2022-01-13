@@ -21,6 +21,8 @@ package ddl_test
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/tidb/store/helper"
+	"github.com/pingcap/tidb/table"
 	"math"
 	"time"
 
@@ -219,6 +221,66 @@ func (s *tiflashDDLTestSuite) SetPdLoop(tick int) func() {
 	return func() {
 		ddl.PullTiFlashPdTick = originValue
 	}
+}
+
+func (s *tiflashDDLTestSuite) TestGetDropOrTruncateTableTiflash(c *C) {
+	tk := testkit.NewTestKit(c, s.store)
+	fCancel := TempDisableEmulatorGC()
+	defer fCancel()
+	ChangeGCSafePoint(tk, time.Now().Add(-24*time.Hour), "false", "10m0s")
+	defer func() {
+		ChangeGCSafePoint(tk, time.Now(), "true", "10m0s")
+	}()
+
+	tk.MustExec("use test")
+	tk.MustExec("drop table if exists ddltiflashpd")
+	tk.MustExec("drop table if exists ddltiflashpt")
+	tk.MustExec("create table ddltiflashpd(z int) PARTITION BY RANGE(z) (PARTITION p0 VALUES LESS THAN (10),PARTITION p1 VALUES LESS THAN (20), PARTITION p2 VALUES LESS THAN (30))")
+	tk.MustExec("create table ddltiflashpt(z int) PARTITION BY RANGE(z) (PARTITION p0 VALUES LESS THAN (10),PARTITION p1 VALUES LESS THAN (20), PARTITION p2 VALUES LESS THAN (30))")
+	tk.MustExec("alter table ddltiflashpd set tiflash replica 1")
+	tk.MustExec("alter table ddltiflashpt set tiflash replica 1")
+	time.Sleep(ddl.PollTiFlashInterval * RoundToBeAvailablePartitionTable)
+
+	tpd := CheckTableAvailableWithTableName(s.dom, c, 1, []string{}, "test", "ddltiflashpd")
+	tpt := CheckTableAvailableWithTableName(s.dom, c, 1, []string{}, "test", "ddltiflashpt")
+
+	tpdID := int64(-1)
+	for _, p := range tpd.Meta().Partition.Definitions {
+		if len(p.LessThan) == 1 && p.LessThan[0] == "10" {
+			tpdID = p.ID
+			break
+		}
+	}
+	tptID := int64(-1)
+	for _, p := range tpt.Meta().Partition.Definitions {
+		if len(p.LessThan) == 1 && p.LessThan[0] == "10" {
+			tpdID = p.ID
+			break
+		}
+	}
+
+	tk.MustExec("alter table ddltiflashpd truncate partition p0")
+	tk.MustExec("alter table ddltiflashpt drop partition p0")
+
+	time.Sleep(time.Second)
+	var replicaInfos []ddl.TiFlashReplicaStatus
+	store := tk.Se.GetStore().(helper.Storage)
+	tikvHelper := &helper.Helper{
+		Store:       store,
+		RegionCache: store.GetRegionCache(),
+	}
+	ddl.GetDropOrTruncateTableTiflash(tk.Se, s.dom.InfoSchema(), tikvHelper, &replicaInfos)
+
+	count := 0
+	for _, r := range replicaInfos {
+		if r.ID == tpdID {
+			count += 1
+		}
+		if r.ID == tptID {
+			count += 1
+		}
+	}
+	c.Assert(count, Equals, 2)
 }
 
 // Run all kinds of DDLs, and will create no redundant pd rules for TiFlash.
@@ -446,7 +508,7 @@ func (s *tiflashDDLTestSuite) TestTiFlashDropPartition(c *C) {
 	CheckTableAvailableWithTableName(s.dom, c, 1, []string{}, "test", "ddltiflash")
 }
 
-func CheckTableAvailableWithTableName(dom *domain.Domain, c *C, count uint64, labels []string, db string, table string) {
+func CheckTableAvailableWithTableName(dom *domain.Domain, c *C, count uint64, labels []string, db string, table string) table.Table {
 	tb, err := dom.InfoSchema().TableByName(model.NewCIStr(db), model.NewCIStr(table))
 	c.Assert(err, IsNil)
 	replica := tb.Meta().TiFlashReplica
@@ -454,6 +516,7 @@ func CheckTableAvailableWithTableName(dom *domain.Domain, c *C, count uint64, la
 	c.Assert(replica.Available, Equals, true)
 	c.Assert(replica.Count, Equals, count)
 	c.Assert(replica.LocationLabels, DeepEquals, labels)
+	return tb
 }
 
 func CheckTableAvailable(dom *domain.Domain, c *C, count uint64, labels []string) {
