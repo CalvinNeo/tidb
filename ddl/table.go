@@ -1152,6 +1152,7 @@ func onUpdateFlashReplicaStatus(t *meta.Meta, job *model.Job) (ver int64, _ erro
 		return ver, errors.Errorf("the replica available status of table %s is already updated", tblInfo.Name.String())
 	}
 
+    logutil.BgLogger().Info("onUpdateFlashReplicaStatus AAAAAAAAAAAAA", zap.Bool("av", tblInfo.ID == physicalID))
 	if tblInfo.ID == physicalID {
 		tblInfo.TiFlashReplica.Available = available
 	} else if pi := tblInfo.GetPartitionInfo(); pi != nil {

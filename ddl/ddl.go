@@ -405,7 +405,7 @@ func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 	metrics.DDLCounter.WithLabelValues(metrics.CreateDDLInstance).Inc()
 
 	// Start some background routine to manage TiFlash replica.
-	go d.PollTiFlashRoutine()
+	// go d.PollTiFlashRoutine()
 
 	return nil
 }

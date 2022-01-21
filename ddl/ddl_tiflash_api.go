@@ -221,12 +221,6 @@ func (d *ddl) pollTiFlashReplicaStatus(ctx sessionctx.Context, pollTiFlashContex
 	pollTiFlashContext.UpdateTiFlashStoreCounter %= UpdateTiFlashStoreTick
 
 	// The following loop updates TiFlash store's status address.
-	for _, store := range pollTiFlashContext.TiFlashStores {
-		s := store
-		if err := d.UpdateTiFlashHTTPAddress(&s); err != nil {
-			logutil.BgLogger().Error("Update TiFlash status address failed", zap.Error(err))
-		}
-	}
 
 	// Start to process every table.
 	schema := d.GetInfoSchemaWithInterceptor(ctx)
@@ -296,9 +290,6 @@ func (d *ddl) pollTiFlashReplicaStatus(ctx sessionctx.Context, pollTiFlashContex
 				}
 			}
 			// Will call `onUpdateFlashReplicaStatus` to update `TiFlashReplica`.
-			if err := d.UpdateTableReplicaInfo(ctx, tb.ID, avail); err != nil {
-				logutil.BgLogger().Error("UpdateTableReplicaInfo error when updating TiFlash replica status", zap.Error(err))
-			}
 		}
 	}
 
