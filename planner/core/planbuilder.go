@@ -2808,7 +2808,7 @@ func buildColumnWithName(tableName, name string, tp byte, size int) (*expression
 
 func buildAlterDatabaseSetTiFlashReplicaFields() (*expression.Schema, types.NameSlice) {
 	schema := newColumnsWithNames(1)
-	schema.Append(buildColumnWithName("", "haha", mysql.TypeVarchar, 64))
+	schema.Append(buildColumnWithName("", "Finished", mysql.TypeLonglong, 4))
 
 	return schema.col2Schema(), schema.names
 }

@@ -329,7 +329,7 @@ func (e *DDLExec) executeCreateDatabase(s *ast.CreateDatabaseStmt) error {
 func (e *DDLExec) executeAlterDatabase(s *ast.AlterDatabaseStmt, req *chunk.Chunk) error {
 	err := domain.GetDomain(e.ctx).DDL().AlterSchema(e.ctx, s)
 	req.Reset()
-	req.AppendString(0, "aaa")
+	req.AppendInt64(0, 1)
 	return err
 }
 
