@@ -138,7 +138,7 @@ func (e *DDLExec) Next(ctx context.Context, req *chunk.Chunk) (err error) {
 
 	switch x := e.stmt.(type) {
 	case *ast.AlterDatabaseStmt:
-		err = e.executeAlterDatabase(x)
+		err = e.executeAlterDatabase(x, req)
 	case *ast.AlterTableStmt:
 		err = e.executeAlterTable(ctx, x)
 	case *ast.CreateIndexStmt:
@@ -326,8 +326,10 @@ func (e *DDLExec) executeCreateDatabase(s *ast.CreateDatabaseStmt) error {
 	return err
 }
 
-func (e *DDLExec) executeAlterDatabase(s *ast.AlterDatabaseStmt) error {
+func (e *DDLExec) executeAlterDatabase(s *ast.AlterDatabaseStmt, req *chunk.Chunk) error {
 	err := domain.GetDomain(e.ctx).DDL().AlterSchema(e.ctx, s)
+	req.Reset()
+	req.AppendString(0, "aaa")
 	return err
 }
 

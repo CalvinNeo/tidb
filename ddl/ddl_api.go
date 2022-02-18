@@ -229,10 +229,11 @@ func (d *ddl) ModifySchemaSetTiFlashReplica(ctx sessionctx.Context, stmt *ast.Al
 		} else {
 			succ += 1
 		}
-		logutil.BgLogger().Info("processing schema table", zap.Int64("t", tbl.ID), zap.Int64("s", dbInfo.ID), zap.Error(err))
+		logutil.BgLogger().Info("processing schema table", zap.Int64("tableID", tbl.ID), zap.Int64("schemaID", dbInfo.ID), zap.Error(err))
 	}
 	if l := len(fail); l > 0 {
-		return fmt.Errorf("meet %v failures, including table %v", l, fail[0])
+		//return fmt.Errorf("meet %v failures, including table %v", l, fail[0])
+		return nil
 	} else {
 		return nil
 	}

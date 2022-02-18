@@ -21,6 +21,10 @@ package ddl_test
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/tidb/parser/charset"
+	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/util/chunk"
 	"math"
 	"testing"
 	"time"
@@ -619,13 +623,32 @@ func TestAlterDatabaseBasic(t *testing.T) {
 	defer teardown()
 	tk := testkit.NewTestKit(t, s.store)
 
+	x := []*types.FieldType{
+		{
+			Tp:      mysql.TypeString,
+			Flen:    2,
+			Charset: charset.CharsetUTF8MB4,
+			Collate: charset.CollationBin,
+		},
+	}
+	chk := chunk.New(x, 32, 32)
+	//tk.MustExec("create table test.tiflash_ddl(z int)")
+	//rs, err := tk.Exec("show create table test.tiflash_ddl")
+	//err = rs.Next(context.Background(), chk)
+	//require.NoError(t, err)
+
 	tk.MustExec("drop database if exists tiflash_ddl")
 	tk.MustExec("create database tiflash_ddl")
 	tk.MustExec("create table tiflash_ddl.ddltiflash(z int)")
 	tk.MustExec("create table tiflash_ddl.ddltiflash2(z int)")
 	tk.MustExec("alter table tiflash_ddl.ddltiflash set tiflash replica 1")
-	tk.MustExec("alter database tiflash_ddl set tiflash replica 2")
-	time.Sleep(ddl.PollTiFlashInterval * RoundToBeAvailable * 2)
+	time.Sleep(ddl.PollTiFlashInterval * RoundToBeAvailable)
+	CheckTableAvailableWithTableName(s.dom, t, 1, []string{}, "tiflash_ddl", "ddltiflash")
+	res, e := tk.Exec("alter database tiflash_ddl set tiflash replica 2")
+	require.NoError(t, e)
+	require.NoError(t, res.Next(context.Background(), chk))
+	require.Equal(t, chk.Column(0).GetString(0), "aaa")
+	time.Sleep(ddl.PollTiFlashInterval * RoundToBeAvailable * 3)
 	CheckTableAvailableWithTableName(s.dom, t, 2, []string{}, "tiflash_ddl", "ddltiflash")
 	CheckTableAvailableWithTableName(s.dom, t, 2, []string{}, "tiflash_ddl", "ddltiflash2")
 }

@@ -2806,6 +2806,13 @@ func buildColumnWithName(tableName, name string, tp byte, size int) (*expression
 	}, &types.FieldName{DBName: util2.InformationSchemaName, TblName: model.NewCIStr(tableName), ColName: model.NewCIStr(name)}
 }
 
+func buildAlterDatabaseSetTiFlashReplicaFields() (*expression.Schema, types.NameSlice) {
+	schema := newColumnsWithNames(1)
+	schema.Append(buildColumnWithName("", "haha", mysql.TypeVarchar, 64))
+
+	return schema.col2Schema(), schema.names
+}
+
 type columnsWithNames struct {
 	cols  []*expression.Column
 	names types.NameSlice
@@ -4103,6 +4110,7 @@ func convertValueListToData(valueList []ast.ExprNode, handleColInfos []*model.Co
 
 func (b *PlanBuilder) buildDDL(ctx context.Context, node ast.DDLNode) (Plan, error) {
 	var authErr error
+	isAlterDatabaseSetTiFlashReplica := false
 	switch v := node.(type) {
 	case *ast.AlterDatabaseStmt:
 		if v.AlterDefaultDatabase {
@@ -4116,6 +4124,11 @@ func (b *PlanBuilder) buildDDL(ctx context.Context, node ast.DDLNode) (Plan, err
 				b.ctx.GetSessionVars().User.AuthHostname, v.Name)
 		}
 		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.AlterPriv, v.Name, "", "", authErr)
+		for _, val := range v.Options {
+			if val.Tp == ast.DatabaseSetTiFlashReplica {
+				isAlterDatabaseSetTiFlashReplica = true
+			}
+		}
 	case *ast.AlterTableStmt:
 		if b.ctx.GetSessionVars().User != nil {
 			authErr = ErrTableaccessDenied.GenWithStackByArgs("ALTER", b.ctx.GetSessionVars().User.AuthUsername,
@@ -4364,8 +4377,12 @@ func (b *PlanBuilder) buildDDL(ctx context.Context, node ast.DDLNode) (Plan, err
 		err := ErrSpecificAccessDenied.GenWithStackByArgs("SUPER or PLACEMENT_ADMIN")
 		b.visitInfo = appendDynamicVisitInfo(b.visitInfo, "PLACEMENT_ADMIN", false, err)
 	}
-	p := &DDL{Statement: node}
-	return p, nil
+	if isAlterDatabaseSetTiFlashReplica {
+		d := &DDL{Statement: node}
+		d.setSchemaAndNames(buildAlterDatabaseSetTiFlashReplicaFields())
+		return d, nil
+	}
+	return &DDL{Statement: node}, nil
 }
 
 const (
