@@ -587,9 +587,10 @@ func (d *ddl) PollTiFlashRoutine() {
 			failpoint.Inject("BeforePollTiFlashReplicaStatusLoop", func() {
 				failpoint.Continue()
 			})
-			sctx, err := d.sessPool.get()
-			if err == nil {
-				if d.ownerManager.IsOwner() {
+
+			if d.ownerManager.IsOwner() {
+				sctx, err := d.sessPool.get()
+				if err == nil {
 					_, err := d.pollTiFlashReplicaStatus(sctx, pollTiflashContext)
 					if err != nil {
 						switch err.(type) {
@@ -599,13 +600,13 @@ func (d *ddl) PollTiFlashRoutine() {
 							logutil.BgLogger().Warn("pollTiFlashReplicaStatus returns error", zap.Error(err))
 						}
 					}
-				}
-				d.sessPool.put(sctx)
-			} else {
-				if sctx != nil {
 					d.sessPool.put(sctx)
+				} else {
+					if sctx != nil {
+						d.sessPool.put(sctx)
+					}
+					logutil.BgLogger().Error("failed to get session for pollTiFlashReplicaStatus", zap.Error(err))
 				}
-				logutil.BgLogger().Error("failed to get session for pollTiFlashReplicaStatus", zap.Error(err))
 			}
 		}
 	}
