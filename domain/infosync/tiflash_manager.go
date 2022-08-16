@@ -277,6 +277,7 @@ func (tiflash *MockTiFlash) setUpMockTiFlashHTTPServer() {
 			return
 		}
 		table, ok := tiflash.SyncStatus[tableID]
+		table.Regions = []int{}
 		if !ok {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("0\n\n"))

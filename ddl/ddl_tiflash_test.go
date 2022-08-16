@@ -347,6 +347,36 @@ func TestTiFlashReplicaPartitionTableBlock(t *testing.T) {
 	s.CheckFlashback(tk, t)
 }
 
+// Truncate partition shall not block.
+func TestTiFlashHAHAHAHA(t *testing.T) {
+	s, teardown := createTiFlashContext(t)
+	defer teardown()
+	tk := testkit.NewTestKit(t, s.store)
+
+	gcWorker, err := gcworker.NewMockGCWorker(s.store)
+	require.NoError(t, err)
+	tk.MustExec("use test")
+	tk.MustExec("drop table if exists ddltiflash")
+	tk.MustExec("create table ddltiflash(i int, s varchar(255))")
+	tb, err := s.dom.InfoSchema().TableByName(model.NewCIStr("test"), model.NewCIStr("ddltiflash"))
+	tbid := tb.Meta().ID
+
+	tk.MustExec("alter table ddltiflash set tiflash replica 1")
+	time.Sleep(2 * time.Second)
+
+	p, err := infosync.GetTiFlashTableSyncProgress(context.Background())
+	require.NoError(t, err)
+	_, ok := p[tbid]
+	require.True(t, ok)
+
+	tk.MustExec("drop table ddltiflash")
+	require.Nil(t, gcWorker.DeleteRanges(context.TODO(), math.MaxInt64))
+	p, err = infosync.GetTiFlashTableSyncProgress(context.Background())
+	require.NoError(t, err)
+	_, ok = p[tbid]
+	require.True(t, ok)
+}
+
 // TiFlash Table shall be eventually available.
 func TestTiFlashReplicaAvailable(t *testing.T) {
 	s, teardown := createTiFlashContext(t)
