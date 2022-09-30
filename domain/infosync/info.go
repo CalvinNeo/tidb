@@ -1104,8 +1104,6 @@ func DeleteInternalSession(se interface{}) {
 	}
 	sm.DeleteInternalSession(se)
 }
-<<<<<<< HEAD
-=======
 
 // SetEtcdClient is only used for test.
 func SetEtcdClient(etcdCli *clientv3.Client) {
@@ -1144,4 +1142,3 @@ func SetPDScheduleConfig(ctx context.Context, config map[string]interface{}) err
 	}
 	return is.scheduleManager.SetPDScheduleConfig(ctx, config)
 }
->>>>>>> 4cb0d1f7a... ddl: Delete TiFlash sync status from etcd when table is truncated or dropped (#37184)
